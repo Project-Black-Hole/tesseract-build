@@ -1,0 +1,30 @@
+{
+  "tesseract": {
+    "version": "5.5.3",
+    "file": "tesseract-5.5.3.tar.gz",
+    "url": "https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.3.tar.gz",
+    "sha256": "9218e62793116d42a9f6d14cd9348518b27f382096eea3d0f2d1a24616bb5884",
+    "bytes": 1916037
+  },
+  "leptonica": {
+    "version": "1.87.0",
+    "file": "leptonica-1.87.0.tar.gz",
+    "url": "https://github.com/DanBloomberg/leptonica/releases/download/1.87.0/leptonica-1.87.0.tar.gz",
+    "sha256": "c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7",
+    "bytes": 14802808
+  },
+  "tessdata": {
+    "version": "87416418657359cb625c412a48b6e1d6d41c29bd",
+    "file": "eng-874164186573.traineddata",
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata",
+    "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+    "bytes": 4113088
+  },
+  "tessdataLicense": {
+    "version": "87416418657359cb625c412a48b6e1d6d41c29bd",
+    "file": "tessdata_fast-874164186573-LICENSE",
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "bytes": 11358
+  }
+}
