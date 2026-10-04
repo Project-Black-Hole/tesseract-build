@@ -28,3 +28,9 @@ python build.py pin --tesseract <tag> --leptonica <tag> --tessdata <commit of te
 
 writes `sources.pin.json` from fresh downloads. Commit it and push a tag
 named `<tesseract version>-<build number>`.
+
+## Licence
+
+The build scripts in this repository are under the Apache License 2.0
+(`LICENSE`). The sources they build keep their own licences; each archive
+carries them in `licenses/`.
