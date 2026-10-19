@@ -1,7 +1,8 @@
 # tesseract-build
 
 Builds one small [Tesseract](https://github.com/tesseract-ocr/tesseract) OCR
-library for Windows (x64) and Linux (x64), from sources pinned by SHA-256.
+library for Windows (x64), Linux (x64) and macOS (Apple Silicon, 13.3 or
+newer), from sources pinned by SHA-256.
 
 - `sources.pin.json` names the exact sources: Tesseract, Leptonica and the
   English language data of `tessdata_fast`, each with its SHA-256.
@@ -9,13 +10,16 @@ library for Windows (x64) and Linux (x64), from sources pinned by SHA-256.
   a static library with **no picture-format library** (the caller hands
   Tesseract pixels), and Tesseract as **one shared library**: the LSTM engine
   only, no training tools, no libcurl, no libarchive, no OpenMP, the C and
-  C++ runtimes inside the library. It then checks what the library depends
-  on (the operating system's own libraries alone), reads a test picture with
-  it, and writes `dist/tesseract-<platform>.tgz`.
+  C++ runtimes inside the library (on macOS they are the system's). It then
+  checks what the library depends on (the operating system's own libraries
+  alone; on macOS also arm64 only, its lowest macOS, its `@rpath` name and
+  its signature), reads a test picture with it, and writes
+  `dist/tesseract-<platform>.tgz`.
 - The workflow runs that on GitHub's runners. A pushed tag publishes a
-  release: the two archives, `SHA256SUMS` and `sources.pin.json`.
+  release: the three archives, `SHA256SUMS` and `sources.pin.json`.
 
-An archive holds the library (`bin/tesseract.dll` or `lib/libtesseract.so`),
+An archive holds the library (`bin/tesseract.dll`, `lib/libtesseract.so` or
+`lib/libtesseract.dylib`),
 `tessdata/eng.traineddata`, `licenses/` (Tesseract: Apache 2.0; Leptonica:
 BSD 2-clause; the language data: Apache 2.0) and `BUILD.json` (versions,
 options, hashes).

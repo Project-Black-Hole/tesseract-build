@@ -31,6 +31,10 @@ jobs:
           - platform: linux-x64
             runner: ubuntu-22.04
             python: python3
+          # Named exactly, never macos-latest: the runner is part of the build.
+          - platform: macos-arm64
+            runner: macos-26
+            python: python3
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -38,6 +42,7 @@ jobs:
       - name: Tools
         shell: bash
         run: |
+          if [ "$RUNNER_OS" = macOS ]; then sw_vers; uname -m; xcodebuild -version; fi
           cmake --version
           ${{ matrix.python }} --version
       - name: Build, check and package
@@ -78,4 +83,4 @@ jobs:
           cp ../sources.pin.json .
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
             --notes "Built by this repository's workflow from the sources in sources.pin.json (commit $GITHUB_SHA)." \
-            tesseract-win-x64.tgz tesseract-linux-x64.tgz SHA256SUMS sources.pin.json
+            tesseract-win-x64.tgz tesseract-linux-x64.tgz tesseract-macos-arm64.tgz SHA256SUMS sources.pin.json

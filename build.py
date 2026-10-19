@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Builds one small Tesseract library from pinned sources.
+"""Builds one small Tesseract library from pinned sources (Windows x64,
+Linux x64, macOS arm64).
 
     python build.py pin --tesseract <tag> --leptonica <tag> --tessdata <commit>
         Downloads the three sources, hashes them and writes sources.pin.json.
@@ -7,8 +8,9 @@
         Checks every source against its SHA-256, builds Leptonica (static,
         with no picture-format library) and Tesseract (one shared library:
         the LSTM engine only, no training tools, no libcurl, no libarchive,
-        no OpenMP), checks what the library depends on, reads a test picture
-        with it and writes dist/tesseract-<platform>.tgz.
+        no OpenMP), checks what the library depends on (on macOS also: arm64
+        only, its lowest macOS, its install name and its signature), reads a
+        test picture with it and writes dist/tesseract-<platform>.tgz.
     python build.py smoke --lib <library> --tessdata <folder>
         Reads the test picture with a library that is already built.
 
@@ -39,6 +41,19 @@ DIST = ROOT / "dist"
 SMOKE_PICTURE = ROOT / "smoke" / "text.pgm"
 SMOKE_WORDS = ["Pinned", "build", "42"]
 
+# macOS (Apple Silicon): arm64 only, the lowest macOS of the engine's build
+# (whisper-build), and the library named @rpath/<file>: the app loads it by
+# its path, so no folder of this build is written into it.
+MACOS_DEPLOYMENT_TARGET = "13.3"
+MACOS_OPTIONS = [
+    "-DCMAKE_OSX_ARCHITECTURES=arm64",
+    f"-DCMAKE_OSX_DEPLOYMENT_TARGET={MACOS_DEPLOYMENT_TARGET}",
+]
+MACOS_LIBRARY_OPTIONS = [
+    "-DCMAKE_INSTALL_NAME_DIR=@rpath",
+    "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
+]
+
 # A library's name must not hold any of these: the build is meant to
 # depend on the operating system alone.
 FORBIDDEN = re.compile(
@@ -59,6 +74,10 @@ def fail(text):
 
 def platform_name():
     machine = platform.machine().lower()
+    if sys.platform == "darwin":
+        if machine != "arm64":
+            fail(f"only arm64 is built on macOS, this is {machine}")
+        return "macos-arm64"
     if machine not in ("x86_64", "amd64"):
         fail(f"only x64 is built here, this is {machine}")
     return "win-x64" if os.name == "nt" else "linux-x64"
@@ -211,6 +230,8 @@ def cmd_build(args):
         "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DSW_BUILD=OFF",
     ]
+    if plat == "macos-arm64":
+        common += MACOS_OPTIONS
 
     say("\n== Leptonica: static, no picture-format library")
     formats = ["ZLIB", "PNG", "GIF", "JPEG", "TIFF", "WEBP", "OPENJPEG"]
@@ -249,19 +270,30 @@ def cmd_build(args):
     ]
     if plat == "linux-x64":
         options.append("-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
+    if plat == "macos-arm64":
+        options += MACOS_LIBRARY_OPTIONS
     cmake(tess_src, WORK / "tb", options, env)
 
     library = find_library(prefix, plat)
     say(f"\nbuilt {library}  {library.stat().st_size} bytes")
 
     say("\n== What the library depends on")
-    needs = imports_pe(library) if plat == "win-x64" else needs_elf(library)
+    if plat == "win-x64":
+        needs = imports_pe(library)
+    elif plat == "macos-arm64":
+        needs = needs_macho(library)
+    else:
+        needs = needs_elf(library)
     for name in needs:
         say(f"NEEDS  {name}")
-    bad = [name for name in needs if FORBIDDEN.search(name)]
+    bad = [name for name in needs if FORBIDDEN.search(name.rsplit("/", 1)[-1])]
+    if plat == "macos-arm64":
+        bad += [name for name in needs if not name.startswith(("/usr/lib/", "/System/Library/"))]
     if bad:
         fail("the library depends on " + ", ".join(bad))
     say("PASS  it depends on the operating system's own libraries alone")
+    if plat == "macos-arm64":
+        check_macho(library)
 
     say("\n== Package")
     name = f"tesseract-{plat}"
@@ -270,7 +302,11 @@ def cmd_build(args):
         shutil.rmtree(stage)
     (stage / "tessdata").mkdir(parents=True)
     (stage / "licenses").mkdir()
-    inside = Path("bin/tesseract.dll") if plat == "win-x64" else Path("lib/libtesseract.so")
+    inside = {
+        "win-x64": Path("bin/tesseract.dll"),
+        "linux-x64": Path("lib/libtesseract.so"),
+        "macos-arm64": Path("lib/libtesseract.dylib"),
+    }[plat]
     (stage / inside).parent.mkdir()
     shutil.copyfile(library, stage / inside)
     shutil.copyfile(files["tessdata"], stage / "tessdata" / "eng.traineddata")
@@ -290,8 +326,10 @@ def cmd_build(args):
         "librarySha256": sha256(stage / inside),
         "languageSha256": sha256(stage / "tessdata" / "eng.traineddata"),
         "needs": needs,
-        "tesseractOptions": [option for option in options if not option.startswith("-DCMAKE_INSTALL") and "PREFIX" not in option and "Leptonica_DIR" not in option],
+        "tesseractOptions": [option for option in options if not option.startswith("-DCMAKE_INSTALL_PREFIX") and not option.startswith("-DCMAKE_INSTALL_LIBDIR") and "PREFIX" not in option and "Leptonica_DIR" not in option],
     }
+    if plat == "macos-arm64":
+        build_info["macos"] = {"deploymentTarget": MACOS_DEPLOYMENT_TARGET, **xcode_report()}
     (stage / "BUILD.json").write_text(json.dumps(build_info, indent=2) + "\n", encoding="utf-8", newline="\n")
 
     archive = DIST / f"{name}.tgz"
@@ -327,6 +365,8 @@ def check_leptonica_config(build):
 def find_library(prefix, plat):
     if plat == "win-x64":
         found = [path for path in (prefix / "bin").glob("*.dll") if "tesseract" in path.name.lower()]
+    elif plat == "macos-arm64":
+        found = sorted({path.resolve() for path in (prefix / "lib").glob("libtesseract*.dylib")})
     else:
         found = [path.resolve() for path in (prefix / "lib").glob("libtesseract.so*")]
         found = sorted(set(found))
@@ -338,6 +378,99 @@ def find_library(prefix, plat):
 def needs_elf(library):
     out = subprocess.run(["readelf", "-d", str(library)], check=True, capture_output=True, text=True).stdout
     return re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", out)
+
+
+def tool(arguments):
+    """Runs a macOS developer tool: (exit code, its output and errors)."""
+    done = subprocess.run([str(part) for part in arguments], capture_output=True, text=True)
+    return done.returncode, done.stdout + done.stderr
+
+
+def ask(arguments):
+    code, out = tool(arguments)
+    if code != 0:
+        fail(f"{' '.join(str(a) for a in arguments)} ended with {code}: {out.strip()[:400]}")
+    return out
+
+
+def parse_install_name(text):
+    """`otool -D <file>`: the library's own install name, or None."""
+    lines = [line.strip() for line in text.splitlines()[1:] if line.strip()]
+    return lines[0] if lines else None
+
+
+def parse_linked(text, own):
+    """`otool -L <file>`: what it links, without its own install name (otool
+    lists a library's own name first)."""
+    linked = []
+    for line in text.splitlines()[1:]:
+        found = re.match(r"^\s+(\S.*?) \(compatibility version [^)]*\)\s*$", line)
+        if found and found.group(1) != own:
+            linked.append(found.group(1))
+    return linked
+
+
+def load_commands(text, wanted, field):
+    """`otool -l <file>`: the `field` of every load command named `wanted`."""
+    values, command = [], None
+    for line in text.splitlines():
+        words = line.split()
+        if len(words) >= 2 and words[0] == "cmd":
+            command = words[1]
+        elif command == wanted and len(words) >= 2 and words[0] == field:
+            values.append(re.sub(r"\s+\(offset \d+\)\s*$", "", line.strip()[len(field):].strip()))
+    return values
+
+
+def parse_minos(text):
+    """`otool -l <file>`: the lowest macOS it runs on, or None."""
+    found = load_commands(text, "LC_BUILD_VERSION", "minos") or load_commands(text, "LC_VERSION_MIN_MACOSX", "version")
+    return found[0] if found else None
+
+
+def version_tuple(text):
+    return tuple(int(n) for n in re.findall(r"\d+", text or ""))
+
+
+def needs_macho(library):
+    own = parse_install_name(ask(["otool", "-D", library]))
+    return parse_linked(ask(["otool", "-L", library]), own)
+
+
+def check_macho(library):
+    """arm64 only, at or below the deployment target, named @rpath/<file>,
+    no run path into this build, and the linker's own signature intact."""
+    archs = ask(["lipo", "-archs", library]).split()
+    if archs != ["arm64"]:
+        fail(f"the library is not arm64 only ({' '.join(archs) or 'nothing'})")
+    own = parse_install_name(ask(["otool", "-D", library]))
+    if not own or not own.startswith("@rpath/"):
+        fail(f"the library's install name is {own!r}, not @rpath/<file>")
+    commands = ask(["otool", "-l", library])
+    rpaths = load_commands(commands, "LC_RPATH", "path")
+    if any(path != "@loader_path" for path in rpaths):
+        fail(f"the library has a run path other than @loader_path: {', '.join(rpaths)}")
+    minos = parse_minos(commands)
+    if not minos or version_tuple(minos) > version_tuple(MACOS_DEPLOYMENT_TARGET):
+        fail(f"the library needs macOS {minos or '(not said)'}, above {MACOS_DEPLOYMENT_TARGET}")
+    code, out = tool(["codesign", "--verify", "--strict", library])
+    if code != 0:
+        fail(f"codesign --verify --strict ended with {code}: {out.strip()[:400]}")
+    say(f"PASS  arm64 only, named {own}, macOS {minos} (at most {MACOS_DEPLOYMENT_TARGET}), no run path into the build, its signature verified")
+
+
+def xcode_report():
+    """What compiled the macOS build (recorded, not pinned)."""
+    found = {}
+    for key, arguments in (("xcode", ["xcodebuild", "-version"]),
+                           ("sdk", ["xcrun", "--show-sdk-version"]),
+                           ("clang", ["xcrun", "clang", "--version"])):
+        try:
+            code, out = tool(arguments)
+        except OSError as error:
+            code, out = 1, str(error)
+        found[key] = " ".join(out.split()) if code == 0 else f"(not read: {out.strip()[:200]})"
+    return found
 
 
 def imports_pe(library):
